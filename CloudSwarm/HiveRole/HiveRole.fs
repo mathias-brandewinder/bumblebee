@@ -25,15 +25,27 @@ type WorkerRole() =
     let hiveId = Guid.NewGuid ()
     let hiveName = string hiveId
     let pingInterval = 1000 * 5 // 5 secs between pings
+    let pairInterval = 1000 * 5 // 5 secs between pair reads
 
     let connString = 
         "Microsoft.ServiceBus.ConnectionString"
         |> CloudConfigurationManager.GetSetting
 
+    let namespaceManager = 
+        connString
+        |> NamespaceManager.CreateFromConnectionString
+
     // assume the queue is created by the Queen
     // need to handle the disconnected case!
     let pingQueue = 
         QueueClient.CreateFromConnectionString(connString, "swarmqueue", ReceiveMode.ReceiveAndDelete)
+
+    // assume the topic is created by the Queen
+    // need to handle the disconnected case!
+    let subscription =
+        let topicFilter = SqlFilter(hiveName |> sprintf "HiveName = '%s'")
+        namespaceManager.CreateSubscription("hivepairs", hiveName, topicFilter) |> ignore
+        SubscriptionClient.CreateFromConnectionString(connString, "hivepairs", hiveName)
 
     override wr.Run() =
 
@@ -48,6 +60,20 @@ type WorkerRole() =
                 return! ping () }
 
         ping () |> Async.Start
+
+        let rec pairListener () =
+            async {
+                let msg = subscription.Receive ()
+                match msg with
+                | null -> ignore ()
+                | msg  ->
+                    let hiveName = msg.Properties.["HiveName"] |> string
+                    log (sprintf "Hive: pair from %s" hiveName) "Information"
+                    msg.Complete ()
+                do! Async.Sleep pairInterval
+                return! pairListener () }
+
+        pairListener () |> Async.Start
 
         while(true) do 
             Thread.Sleep(10000)
