@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ServiceDefinition name="CloudSwarm" xmlns="http://schemas.microsoft.com/ServiceHosting/2008/10/ServiceDefinition" schemaVersion="2014-06.2.4">
+  <WorkerRole name="QueenRole" vmsize="Small">
+    <Imports>
+      <Import moduleName="Diagnostics" />
+    </Imports>
+    <ConfigurationSettings>
+      <Setting name="Microsoft.ServiceBus.ConnectionString"/>
+    </ConfigurationSettings>
+  </WorkerRole>
+  <WorkerRole name="HiveRole" vmsize="Small">
+    <Imports>
+      <Import moduleName="Diagnostics" />
+    </Imports>
+    <ConfigurationSettings>
+      <Setting 
+        name="Microsoft.ServiceBus.ConnectionString" />
+    </ConfigurationSettings>
+    <Endpoints>
+      <InternalEndpoint
+        name="SolutionsServer"
+        protocol="tcp"
+        port="1000"/>
+      <InternalEndpoint 
+        name="SolutionsClient" 
+        protocol="tcp" 
+        port="2000"/>
+    </Endpoints>
+  </WorkerRole>
+</ServiceDefinition>

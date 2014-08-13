@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.30723.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{CC5FD16D-436D-48AD-A40C-5A424C6E3E79}") = "CloudSwarm", "CloudSwarm\CloudSwarm.ccproj", "{A8A671DA-C835-4F9A-902E-B710BB2366D9}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "QueenRole", "QueenRole\QueenRole.fsproj", "{DEB06C13-86BD-47CB-8C2B-9265B1ACE88D}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "HiveRole", "HiveRole\HiveRole.fsproj", "{AD4D6492-D792-41E0-99A4-B225541FFA45}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A8A671DA-C835-4F9A-902E-B710BB2366D9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A8A671DA-C835-4F9A-902E-B710BB2366D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A8A671DA-C835-4F9A-902E-B710BB2366D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A8A671DA-C835-4F9A-902E-B710BB2366D9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DEB06C13-86BD-47CB-8C2B-9265B1ACE88D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEB06C13-86BD-47CB-8C2B-9265B1ACE88D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEB06C13-86BD-47CB-8C2B-9265B1ACE88D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DEB06C13-86BD-47CB-8C2B-9265B1ACE88D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AD4D6492-D792-41E0-99A4-B225541FFA45}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AD4D6492-D792-41E0-99A4-B225541FFA45}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AD4D6492-D792-41E0-99A4-B225541FFA45}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AD4D6492-D792-41E0-99A4-B225541FFA45}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
