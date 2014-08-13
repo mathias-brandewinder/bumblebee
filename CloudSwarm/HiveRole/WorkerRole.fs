@@ -15,20 +15,40 @@ open Microsoft.WindowsAzure
 open Microsoft.WindowsAzure.Diagnostics
 open Microsoft.WindowsAzure.ServiceRuntime
 open Microsoft.ServiceBus
+open Microsoft.ServiceBus.Messaging
 
 type WorkerRole() =
     inherit RoleEntryPoint() 
 
     let log message (kind : string) = Trace.TraceInformation(message, kind)
 
-    let namespaceManager = 
+    let hiveId = Guid.NewGuid ()
+    let hiveName = string hiveId
+    let pingInterval = 1000 * 5 // 5 secs between pings
+
+    let connString = 
         "Microsoft.ServiceBus.ConnectionString"
         |> CloudConfigurationManager.GetSetting
-        |> NamespaceManager.CreateFromConnectionString
+
+    // assume the queue is created by the Queen
+    // need to handle the disconnected case!
+    let pingQueue = 
+        QueueClient.CreateFromConnectionString(connString, "swarmqueue", ReceiveMode.ReceiveAndDelete)
 
     override wr.Run() =
 
         log "HiveRole entry point called" "Information"
+
+        let rec ping () =
+            async {
+                let msg = new BrokeredMessage ()
+                msg.Properties.["HiveName"] <- hiveName
+                pingQueue.Send msg
+                do! Async.Sleep pingInterval
+                return! ping () }
+
+        ping () |> Async.Start
+
         while(true) do 
             Thread.Sleep(10000)
             log "Working" "Information"
