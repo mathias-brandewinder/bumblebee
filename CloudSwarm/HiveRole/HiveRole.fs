@@ -17,6 +17,8 @@ open Microsoft.WindowsAzure.ServiceRuntime
 open Microsoft.ServiceBus
 open Microsoft.ServiceBus.Messaging
 
+type HivePartnership = | Isolated | TalkTo of Address:string
+
 type WorkerRole() =
     inherit RoleEntryPoint() 
 
@@ -68,21 +70,25 @@ type WorkerRole() =
 
         // listens to messages suggesting
         // new hive to pair up with
-        let rec pairListener () =
+        let rec pairListener (state) =
             async {
+                log (sprintf "%A" state) "Information"
                 let msg = subscription.Receive ()
-                match msg with
-                | null -> ignore ()
-                | msg  ->
-                    let hiveName = msg.Properties.["HiveName"] |> string
-                    log (sprintf "Hive: pair from %s" hiveName) "Information"
-                    msg.Complete () // TODO figure out if I can avoid this when creating sub
+                let state = 
+                    match msg with
+                    | null -> state
+                    | msg  ->
+                        let hiveName = msg.Properties.["HiveName"] |> string
+                        let partnerAddress = msg.Properties.["PartnerAddress"] |> string
+                        log (sprintf "Hive %s pairs with %s" hiveName partnerAddress) "Information"
+                        msg.Complete () // TODO figure out if I can avoid this when creating sub
+                        TalkTo(partnerAddress)
                 do! Async.Sleep pairInterval
-                return! pairListener () }
+                return! pairListener (state) }
 
         // start everything
         ping () |> Async.Start
-        pairListener () |> Async.RunSynchronously
+        pairListener (Isolated) |> Async.RunSynchronously
 
     override wr.OnStart() = 
 
