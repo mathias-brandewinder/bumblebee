@@ -47,20 +47,27 @@ type WorkerRole() =
         namespaceManager.CreateSubscription("hivepairs", hiveName, topicFilter) |> ignore
         SubscriptionClient.CreateFromConnectionString(connString, "hivepairs", hiveName)
 
+    let serverAddress () =
+        let instance = RoleEnvironment.CurrentRoleInstance
+        instance.InstanceEndpoints.["SolutionsServer"].IPEndpoint.Address
+
     override wr.Run() =
 
         log "HiveRole entry point called" "Information"
 
+        // Send pings on regular basis
         let rec ping () =
             async {
                 let msg = new BrokeredMessage ()
                 msg.Properties.["HiveName"] <- hiveName
+                let address = serverAddress ()
+                msg.Properties.["Address"] <- string address
                 pingQueue.Send msg
                 do! Async.Sleep pingInterval
                 return! ping () }
 
-        ping () |> Async.Start
-
+        // listens to messages suggesting
+        // new hive to pair up with
         let rec pairListener () =
             async {
                 let msg = subscription.Receive ()
@@ -69,15 +76,13 @@ type WorkerRole() =
                 | msg  ->
                     let hiveName = msg.Properties.["HiveName"] |> string
                     log (sprintf "Hive: pair from %s" hiveName) "Information"
-                    msg.Complete ()
+                    msg.Complete () // TODO figure out if I can avoid this when creating sub
                 do! Async.Sleep pairInterval
                 return! pairListener () }
 
-        pairListener () |> Async.Start
-
-        while(true) do 
-            Thread.Sleep(10000)
-            log "Working" "Information"
+        // start everything
+        ping () |> Async.Start
+        pairListener () |> Async.RunSynchronously
 
     override wr.OnStart() = 
 

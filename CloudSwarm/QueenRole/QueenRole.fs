@@ -19,8 +19,8 @@ open Microsoft.ServiceBus.Messaging
 
 type Agent<'a> = MailboxProcessor<'a>
 type PhonebookMessage =
-    | Ping of HiveName:string
-    | Pair of AsyncReplyChannel<string Option>
+    | Ping of HiveName:string * Address:string
+    | Pair of AsyncReplyChannel<(string*string) Option>
 
 type WorkerRole() =
     inherit RoleEntryPoint() 
@@ -51,31 +51,38 @@ type WorkerRole() =
 
         log "QueenRole entry point called" "Information"
 
+        // maintains the current known hives
         let phonebook = new Agent<PhonebookMessage>(fun inbox ->            
-            let hives = ResizeArray<string>()
+            let hives = ResizeArray<string*string>()
             let rng = Random ()
 
             let rec loop () = async {
                 let! msg = inbox.Receive ()
                 match msg with
-                | Ping(name) -> 
+                | Ping(name,address) -> 
                     log "Name in phonebook" "Information"
-                    if hives.Contains name 
+                    if hives.Contains((name,address)) 
                     then ignore ()
-                    else hives.Add name
+                    else hives.Add (name,address)
                 | Pair(channel) -> 
-                    if hives.Count > 0
+                    let count = hives.Count
+                    if count > 0
                     then
-                        hives.[rng.Next(hives.Count)]
-                        |> Some
-                        |> channel.Reply 
+                        let i,j = rng.Next(count), rng.Next(count)
+                        if (i<>j) 
+                        then
+                            (fst hives.[i], snd hives.[j])
+                            |> Some
+                            |> channel.Reply 
+                        else
+                            None |> channel.Reply 
                     else 
                         None |> channel.Reply 
                 return! loop () }
             loop ())
 
-        phonebook.Start ()
 
+        // listens to pings from hives
         let rec pingListener () =
             async {
                 let msg = pingQueue.Receive ()
@@ -83,30 +90,32 @@ type WorkerRole() =
                 | null -> ignore ()
                 | msg  ->
                     let hiveName = msg.Properties.["HiveName"] |> string
-                    log (sprintf "Queen: ping from %s" hiveName) "Information"
-                    Ping(hiveName) |> phonebook.Post 
+                    let address = msg.Properties.["Address"] |> string
+                    log (sprintf "Queen: ping from %s %s" hiveName address) "Information"
+                    Ping(hiveName,address) |> phonebook.Post 
                 return! pingListener () }
 
-        pingListener () |> Async.Start
 
+        // send regularly random pairing of hives
+        // that will now work together
         let rec pairs () =
             async {
                 let reply = phonebook.PostAndReply(fun channel -> 
                     Pair(channel))
                 match reply with
                 | None -> ignore ()
-                | Some(hive) ->
+                | Some(name,address) ->
                     let msg = new BrokeredMessage ()
-                    msg.Properties.["HiveName"] <- hive
+                    msg.Properties.["HiveName"] <- name
+                    msg.Properties.["PartnerAddress"] <- address
                     pairTopic.Send msg
                 do! Async.Sleep pairInterval
                 return! pairs () }
 
-        pairs () |> Async.Start
-
-        while(true) do 
-            Thread.Sleep(10000)
-            log "Working" "Information"
+        // start everything
+        phonebook.Start ()
+        pingListener () |> Async.Start
+        pairs () |> Async.RunSynchronously
 
     override wr.OnStart() = 
 
