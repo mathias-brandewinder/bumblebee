@@ -21,10 +21,6 @@
         name="SolutionsServer"
         protocol="tcp"
         port="1000"/>
-      <InternalEndpoint 
-        name="SolutionsClient" 
-        protocol="tcp" 
-        port="2000"/>
     </Endpoints>
   </WorkerRole>
 </ServiceDefinition>
