@@ -52,6 +52,9 @@ type QueenWorkerRole() =
 
         log "QueenRole entry point called" "Information"
 
+        let test () =
+            ignore ()
+
         // maintains the current known hives
         let phonebook = new Agent<PhonebookMessage>(fun inbox ->            
             let rng = Random ()
@@ -63,10 +66,11 @@ type QueenWorkerRole() =
                     let book = book |> Set.add name
                     return! loop (book)
                 | PairRequest ->
+                    test ()
                     log "Pair requested" "Information"
                     let count = book |> Set.count
                     if (count < 2)
-                    then ignore ()
+                    then return! loop (book)
                     else
                         // Ugly as hell but small collection 
                         let array = book |> Set.toArray
@@ -112,6 +116,7 @@ type QueenWorkerRole() =
 
         // start everything
         phonebook.Start ()
+        pairsGenerator () |> Async.Start
         pingListener () |> Async.RunSynchronously
 
     override queen.OnStart () = 

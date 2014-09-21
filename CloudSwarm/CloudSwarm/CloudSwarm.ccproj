@@ -56,6 +56,7 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="HiveRoleContent\" />
+    <Folder Include="Profiles" />
     <Folder Include="QueenRoleContent\" />
   </ItemGroup>
   <ItemGroup>
@@ -65,6 +66,9 @@
     <Content Include="QueenRoleContent\diagnostics.wadcfg">
       <SubType>Content</SubType>
     </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <PublishProfile Include="Profiles\cloudswarmProduction1.azurePubxml" />
   </ItemGroup>
   <!-- Import the target files for this project template -->
   <PropertyGroup>
