@@ -19,15 +19,18 @@ open Microsoft.ServiceBus.Messaging
 
 type Agent<'a> = MailboxProcessor<'a>
 type PhonebookMessage =
-    | Ping of HiveName:string * Address:string
-    | Pair of AsyncReplyChannel<(string*string) Option>
+    | Ping of HiveName:string
+    | PairRequest
 
-type WorkerRole() =
+type QueenWorkerRole() =
     inherit RoleEntryPoint() 
 
     let log message (kind : string) = Trace.TraceInformation(message, kind)
 
     let pairInterval = 1000 * 5 // 5 secs between pairs
+
+    let pingQueueName = "pings"
+    let pairQueueName = "pairs"
 
     let connString = 
         "Microsoft.ServiceBus.ConnectionString"
@@ -37,87 +40,82 @@ type WorkerRole() =
         connString
         |> NamespaceManager.CreateFromConnectionString
 
+    // Assumes queue exists
     let pingQueue = 
-        if not (namespaceManager.QueueExists "swarmqueue")
-        then namespaceManager.CreateQueue "swarmqueue" |> ignore
-        QueueClient.CreateFromConnectionString(connString, "swarmqueue", ReceiveMode.ReceiveAndDelete)
+        QueueClient.CreateFromConnectionString(connString, pingQueueName, ReceiveMode.ReceiveAndDelete)
     
     let pairTopic = 
-        if not (namespaceManager.TopicExists "hivepairs")
-        then namespaceManager.CreateTopic "hivepairs" |> ignore
-        TopicClient.CreateFromConnectionString(connString, "hivepairs")
+        TopicClient.CreateFromConnectionString(connString, pairQueueName)
 
-    override wr.Run() =
+    // Assumes topic exists
+    override queen.Run() =
 
         log "QueenRole entry point called" "Information"
 
         // maintains the current known hives
         let phonebook = new Agent<PhonebookMessage>(fun inbox ->            
-            let hives = ResizeArray<string*string>()
             let rng = Random ()
-
-            let rec loop () = async {
+            let rec loop (book) = async {
                 let! msg = inbox.Receive ()
                 match msg with
-                | Ping(name,address) -> 
+                | Ping(name) -> 
                     log "Name in phonebook" "Information"
-                    if hives.Contains((name,address)) 
+                    let book = book |> Set.add name
+                    return! loop (book)
+                | PairRequest ->
+                    log "Pair requested" "Information"
+                    let count = book |> Set.count
+                    if (count < 2)
                     then ignore ()
-                    else hives.Add (name,address)
-                | Pair(channel) -> 
-                    let count = hives.Count
-                    if count > 0
-                    then
-                        let i,j = rng.Next(count), rng.Next(count)
-                        if (i<>j) 
+                    else
+                        // Ugly as hell but small collection 
+                        let array = book |> Set.toArray
+                        let first = rng.Next(count)
+                        let second = rng.Next(count)
+                        if (first <> second)
                         then
-                            (fst hives.[i], snd hives.[j])
-                            |> Some
-                            |> channel.Reply 
-                        else
-                            None |> channel.Reply 
-                    else 
-                        None |> channel.Reply 
-                return! loop () }
-            loop ())
+                            let pair = new BrokeredMessage()
+                            pair.Properties.["HiveName"] <- array.[first]
+                            pair.Properties.["Partner"] <- array.[second]
+                            pairTopic.Send pair
+                        return! loop (book) }
+            let hives = Set.empty
+            loop (hives))
 
+        let (|PingMessage|_|) (msg:BrokeredMessage) =
+            match msg with
+            | null -> None
+            | msg ->
+                try
+                    msg.Properties.["HiveName"]
+                    |> string
+                    |> Some
+                with _ -> None
 
         // listens to pings from hives
+        // TODO handle "old" names
         let rec pingListener () =
             async {
-                let msg = pingQueue.Receive ()
+                let! msg = pingQueue.ReceiveAsync () |> Async.AwaitTask
                 match msg with
-                | null -> ignore ()
-                | msg  ->
-                    let hiveName = msg.Properties.["HiveName"] |> string
-                    let address = msg.Properties.["Address"] |> string
-                    log (sprintf "Queen: ping from %s %s" hiveName address) "Information"
-                    Ping(hiveName,address) |> phonebook.Post 
+                | PingMessage(name) ->
+                    log (sprintf "Queen: ping from %s" name) "Information"
+                    Ping(name) |> phonebook.Post 
+                | _ -> ignore ()
                 return! pingListener () }
 
-
-        // send regularly random pairing of hives
-        // that will now work together
-        let rec pairs () =
+        let rec pairsGenerator () =
             async {
-                let reply = phonebook.PostAndReply(fun channel -> 
-                    Pair(channel))
-                match reply with
-                | None -> ignore ()
-                | Some(name,address) ->
-                    let msg = new BrokeredMessage ()
-                    msg.Properties.["HiveName"] <- name
-                    msg.Properties.["PartnerAddress"] <- address
-                    pairTopic.Send msg
+                phonebook.Post PairRequest
                 do! Async.Sleep pairInterval
-                return! pairs () }
+                return! pairsGenerator () }
 
         // start everything
         phonebook.Start ()
-        pingListener () |> Async.Start
-        pairs () |> Async.RunSynchronously
+        pingListener () |> Async.RunSynchronously
 
-    override wr.OnStart() = 
+    override queen.OnStart () = 
+        base.OnStart ()
 
-        ServicePointManager.DefaultConnectionLimit <- 12
-        base.OnStart()
+    override queen.OnStop () =
+        base.OnStop ()
