@@ -20,6 +20,7 @@ open Microsoft.ServiceBus
 open Microsoft.ServiceBus.Messaging
 open Microsoft.WindowsAzure.Storage
 open Microsoft.WindowsAzure.Storage.Blob
+open Microsoft.WindowsAzure.Storage.Table
 
 open Nessos.FsPickler
 
@@ -35,6 +36,13 @@ type HiveMessage =
     | SharingRequest of hiveName:string
     | ReturningBee of evaluation:Evaluation
     | External of evaluation:Evaluation
+
+type BestSolution () =
+    inherit TableEntity ()
+    member val Blob = "" with get,set
+    member val Quality = 0. with get,set
+    member val HiveName = "" with get,set
+    member val Timestamp = DateTime() with get,set
 
 type HiveWorkerRole() =
     inherit RoleEntryPoint() 
@@ -92,6 +100,12 @@ type HiveWorkerRole() =
     let blobClient = storageAccount.CreateCloudBlobClient ()
     let evalsContainer = blobClient.GetContainerReference evalsContainerName
 
+    let tableClient = storageAccount.CreateCloudTableClient ()
+    let bestSolutions = 
+        let table = tableClient.GetTableReference "best"
+        table.CreateIfNotExists () |> ignore
+        table
+
     let binary = FsPickler.CreateBinary ()
 
     let root =
@@ -125,9 +139,6 @@ type HiveWorkerRole() =
             use stream = new MemoryStream(asByteArray)
             blob.UploadFromStream stream
             
-            let blob = evalsContainer.GetBlockBlobReference "TEST"
-            blob.UploadText (DateTime.Now.ToString ())
-
             let msg = new BrokeredMessage ()
             msg.Properties.["HiveName"] <- partner
             msg.Properties.["FileName"] <- fileName
@@ -143,6 +154,30 @@ type HiveWorkerRole() =
                     |> string
                     |> Some
                 with _ -> None
+
+        let saveBest (evaluation:Evaluation) =
+            // save blob
+            // TODO obvious duplication with shareWork
+            // TODO save as JSON, or other human-palatable format?
+            let fileName = Guid.NewGuid () |> string
+            let blob = evalsContainer.GetBlockBlobReference fileName
+            
+            let asByteArray = evaluation |> binary.Pickle
+            
+            use stream = new MemoryStream(asByteArray)
+            blob.UploadFromStream stream
+
+            // log entry
+            let entry = BestSolution ()
+            entry.Blob <- fileName
+            entry.HiveName <- hiveName
+            entry.Quality <- evaluation.Value
+            entry.PartitionKey <- hiveName
+            entry.RowKey <- Guid.NewGuid () |> string
+
+            TableOperation.Insert(entry)
+            |> bestSolutions.Execute
+            |> ignore
 
         let work = new Agent<HiveMessage>(fun inbox ->
             let rng = Random ()
@@ -163,32 +198,38 @@ type HiveWorkerRole() =
                         let best = 
                             if evaluation.Value > best.Value
                             then 
-                                log (sprintf "Value %f" evaluation.Value) "Information"
+                                log (sprintf "New best: %.0f" evaluation.Value) "Information"
+                                saveBest evaluation
                                 evaluation
                             else best
                         
+                        // waggle
                         for i in 0 .. bankSize - 1 do
-                            if evaluations.[i].Value < evaluation.Value
+                            if evaluations.[i].Value < evaluation.Value && rng.NextDouble () < DefaultConfig.ProbaConvince
                             then evaluations.[i] <- evaluation
                         
                         let task = new Task(fun _ -> 
-                            let index = rng.Next(bankSize)
-                            let candidate = evaluations.[index]
-                            let copy = candidate.Solution |> shuffle rng
-                            let value = - length copy
-                            Evaluation(value,copy) |> ReturningBee |> inbox.Post)
+                            let candidate =
+                                if rng.NextDouble () < DefaultConfig.ProbaScout
+                                then
+                                    root |> shuffle rng
+                                else 
+                                    let index = rng.Next(bankSize)
+                                    let candidate = evaluations.[index]
+                                    let copy = candidate.Solution |> localSearch rng  
+                                    copy                                  
+                            let value = quality candidate
+                            Evaluation(value,candidate) |> ReturningBee |> inbox.Post)
+
                         task.Start ()
 
                         evaluations,best,Isolated
 
                     | External(evaluation) ->    
-                        // TODO this is very, very primitive 
-                        // TODO incorrect but good enough for now
+                        // TODO obvious code duplication here
                         let best = 
                             if evaluation.Value > best.Value
-                            then 
-                                log (sprintf "Value %f" evaluation.Value) "Information"
-                                evaluation
+                            then evaluation
                             else best
                         let changed = rng.Next(bankSize)
                         evaluations.[changed] <- evaluation                                       
@@ -196,12 +237,13 @@ type HiveWorkerRole() =
                 return! loop (evaluations,best,sharing) }
 
             let size = root.Length
-            let rootSolution = 
-                let value = - length root
-                Evaluation(value,root)
+            let rootSolution = Evaluation(quality root,root)
 
             let evaluations = Array.init bankSize (fun _ -> rootSolution)
+            // TODO better way? this looks crappy.
             inbox.Post (ReturningBee(rootSolution))
+            inbox.Post (ReturningBee(rootSolution))
+
             loop (evaluations,rootSolution,Isolated))
 
         let rec workListener () =

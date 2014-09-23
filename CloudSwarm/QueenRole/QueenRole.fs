@@ -52,9 +52,6 @@ type QueenWorkerRole() =
 
         log "QueenRole entry point called" "Information"
 
-        let test () =
-            ignore ()
-
         // maintains the current known hives
         let phonebook = new Agent<PhonebookMessage>(fun inbox ->            
             let rng = Random ()
@@ -66,7 +63,6 @@ type QueenWorkerRole() =
                     let book = book |> Set.add name
                     return! loop (book)
                 | PairRequest ->
-                    test ()
                     log "Pair requested" "Information"
                     let count = book |> Set.count
                     if (count < 2)
