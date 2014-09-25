@@ -122,7 +122,7 @@ type HiveWorkerRole() =
             Point(float fields.[1],float fields.[2]))
         |> Seq.toArray       
         
-    let bankSize = 10
+    let bankSize = DefaultConfig.HiveSize
 
     override hive.Run() =
 
@@ -180,50 +180,63 @@ type HiveWorkerRole() =
             |> ignore
 
         let work = new Agent<HiveMessage>(fun inbox ->
+            
             let rng = Random ()
-            let rec loop (evaluations:Evaluation[],best:Evaluation,sharing) = async {
+
+            let rec loop (evaluations:Evaluation[],best:Evaluation,sharing,load:int,estimates:Estimates,last:DateTime) = async {
                 let! msg = inbox.Receive ()
                 // TODO actual work with evaluation
-                let evaluations,best,sharing =
+                let evaluations,best,sharing,load,estimates,last =
                     match msg with
                     | SharingRequest(partner) ->
                         // simply set marker so that
                         // next incoming will be shared
-                        evaluations,best,ShareWith(partner)
+                        evaluations,best,ShareWith(partner),load,estimates,last
                     | ReturningBee(evaluation) ->
                         match sharing with
                         | Isolated -> ignore ()
                         | ShareWith(partner) -> share evaluation partner
-                        // TODO incorrect but good enough for now
+
                         let best = 
                             if evaluation.Value > best.Value
                             then 
                                 log (sprintf "New best: %.0f" evaluation.Value) "Information"
-                                saveBest evaluation
+                                //saveBest evaluation
                                 evaluation
                             else best
                         
+                        let now = DateTime.Now
+                        let elapsed = (now - last).TotalMilliseconds
+                        let estimates = learn estimates (load,elapsed)
+                        let newload = decide rng estimates load
+                        let tasks = 1 + newload - load
+                        log (sprintf "load %i" newload) "Information"
+
                         // waggle
                         for i in 0 .. bankSize - 1 do
                             if evaluations.[i].Value < evaluation.Value && rng.NextDouble () < DefaultConfig.ProbaConvince
                             then evaluations.[i] <- evaluation
                         
-                        let task = new Task(fun _ -> 
-                            let candidate =
-                                if rng.NextDouble () < DefaultConfig.ProbaScout
-                                then
-                                    root |> shuffle rng
-                                else 
-                                    let index = rng.Next(bankSize)
-                                    let candidate = evaluations.[index]
-                                    let copy = candidate.Solution |> localSearch rng  
-                                    copy                                  
-                            let value = quality candidate
-                            Evaluation(value,candidate) |> ReturningBee |> inbox.Post)
+                        for t in 1 .. tasks do
+                            let rng = Random(rng.Next())
+                            let task = new Task(fun _ -> 
+                                let startTime = DateTime.Now
+                                let candidate =
+                                    let scout = rng.NextDouble ()
+                                    if scout < DefaultConfig.ProbaScout
+                                    then
+                                        root |> shuffle rng
+                                    else 
+                                        let index = rng.Next(bankSize)
+                                        let candidate = evaluations.[index]
+                                        let copy = candidate.Solution |> localSearch rng  
+                                        copy                                  
+                                let value = quality candidate
+                                Evaluation(value,candidate) |> ReturningBee |> inbox.Post)
 
-                        task.Start ()
+                            task.Start ()
 
-                        evaluations,best,Isolated
+                        evaluations,best,Isolated,newload,estimates,now
 
                     | External(evaluation) ->    
                         // TODO obvious code duplication here
@@ -233,18 +246,17 @@ type HiveWorkerRole() =
                             else best
                         let changed = rng.Next(bankSize)
                         evaluations.[changed] <- evaluation                                       
-                        evaluations,best,sharing
-                return! loop (evaluations,best,sharing) }
+                        evaluations,best,sharing,load,estimates,last
+                return! loop (evaluations,best,sharing,load,estimates,last) }
 
             let size = root.Length
             let rootSolution = Evaluation(quality root,root)
 
-            let evaluations = Array.init bankSize (fun _ -> rootSolution)
+            let evaluations = Array.init DefaultConfig.HiveSize (fun _ -> rootSolution)
             // TODO better way? this looks crappy.
             inbox.Post (ReturningBee(rootSolution))
-            inbox.Post (ReturningBee(rootSolution))
 
-            loop (evaluations,rootSolution,Isolated))
+            loop (evaluations,rootSolution,Isolated,1,Map.empty,DateTime.Now))
 
         let rec workListener () =
             async {
