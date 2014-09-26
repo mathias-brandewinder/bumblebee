@@ -37,6 +37,11 @@ type HiveMessage =
     | ReturningBee of evaluation:Evaluation
     | External of evaluation:Evaluation
 
+type Tuner = 
+    {   Load:int;
+        Estimates:Estimates;
+        LastReceived:DateTime; }
+
 type BestSolution () =
     inherit TableEntity ()
     member val Blob = "" with get,set
@@ -183,15 +188,16 @@ type HiveWorkerRole() =
             
             let rng = Random ()
 
-            let rec loop (evaluations:Evaluation[],best:Evaluation,sharing,load:int,estimates:Estimates,last:DateTime) = async {
+            let rec loop (evaluations:Evaluation[],best:Evaluation,sharing,tuner:Tuner) = async {
+                
                 let! msg = inbox.Receive ()
-                // TODO actual work with evaluation
-                let evaluations,best,sharing,load,estimates,last =
+
+                let evaluations,best,sharing,tuner =
                     match msg with
                     | SharingRequest(partner) ->
                         // simply set marker so that
                         // next incoming will be shared
-                        evaluations,best,ShareWith(partner),load,estimates,last
+                        evaluations,best,ShareWith(partner),tuner
                     | ReturningBee(evaluation) ->
                         match sharing with
                         | Isolated -> ignore ()
@@ -201,15 +207,15 @@ type HiveWorkerRole() =
                             if evaluation.Value > best.Value
                             then 
                                 log (sprintf "New best: %.0f" evaluation.Value) "Information"
-                                //saveBest evaluation
+                                saveBest evaluation
                                 evaluation
                             else best
                         
                         let now = DateTime.Now
-                        let elapsed = (now - last).TotalMilliseconds
-                        let estimates = learn estimates (load,elapsed)
-                        let newload = decide rng estimates load
-                        let tasks = 1 + newload - load
+                        let elapsed = (now - tuner.LastReceived).TotalMilliseconds
+                        let estimates = learn tuner.Estimates (tuner.Load,elapsed)
+                        let newload = decide rng estimates tuner.Load
+                        let tasks = 1 + newload - tuner.Load
                         log (sprintf "load %i" newload) "Information"
 
                         // waggle
@@ -220,7 +226,6 @@ type HiveWorkerRole() =
                         for t in 1 .. tasks do
                             let rng = Random(rng.Next())
                             let task = new Task(fun _ -> 
-                                let startTime = DateTime.Now
                                 let candidate =
                                     let scout = rng.NextDouble ()
                                     if scout < DefaultConfig.ProbaScout
@@ -236,7 +241,7 @@ type HiveWorkerRole() =
 
                             task.Start ()
 
-                        evaluations,best,Isolated,newload,estimates,now
+                        evaluations,best,Isolated,{ Load = newload; Estimates = estimates; LastReceived = now }
 
                     | External(evaluation) ->    
                         // TODO obvious code duplication here
@@ -246,17 +251,17 @@ type HiveWorkerRole() =
                             else best
                         let changed = rng.Next(bankSize)
                         evaluations.[changed] <- evaluation                                       
-                        evaluations,best,sharing,load,estimates,last
-                return! loop (evaluations,best,sharing,load,estimates,last) }
+                        evaluations,best,sharing,tuner
+                return! loop (evaluations,best,sharing,tuner) }
 
-            let size = root.Length
             let rootSolution = Evaluation(quality root,root)
 
             let evaluations = Array.init DefaultConfig.HiveSize (fun _ -> rootSolution)
-            // TODO better way? this looks crappy.
+
             inbox.Post (ReturningBee(rootSolution))
 
-            loop (evaluations,rootSolution,Isolated,1,Map.empty,DateTime.Now))
+            let tuner = { Load = 1; Estimates = Map.empty; LastReceived = DateTime.Now }
+            loop (evaluations,rootSolution,Isolated,tuner))
 
         let rec workListener () =
             async {

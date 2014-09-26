@@ -28,11 +28,11 @@ module MonaLisa =
             HiveSize:int; }
 
     let DefaultConfig = 
-        {   ProbaConvince = 0.8; 
-            ProbaMistake = 0.05;
-            ProbaScout = 0.25;
-            LocalIterations = 100;
-            HiveSize = 10; }
+        {   ProbaConvince = 0.2; 
+            ProbaMistake = 0.01;
+            ProbaScout = 0.10;
+            LocalIterations = 500000;
+            HiveSize = 100; }
 
     let shuffle (rng:Random) xs =
         let len = xs |> Array.length
@@ -43,9 +43,10 @@ module MonaLisa =
             xs.[i] <- temp
         xs
 
+    let dist (p1:Point) (p2:Point) = 
+        (p1.X - p2.X) * (p1.X - p2.X) + (p1.Y - p2.Y) * (p1.Y - p2.Y)
+
     let length (xs:Solution) =
-        let dist (p1:Point) (p2:Point) = 
-            (p1.X - p2.X) * (p1.X - p2.X) + (p1.Y - p2.Y) * (p1.Y - p2.Y)
         let len = xs |> Array.length
         xs 
         |> Seq.fold (fun (acc,prev) x -> 
@@ -57,25 +58,38 @@ module MonaLisa =
     let localSearch (rng:Random) (xs:Solution) =
         let len = xs |> Array.length
         let iters = DefaultConfig.LocalIterations
-        // this can be improved by avoiding copy
-        // and avoiding recomputing cost:
-        // just compute the delta cost
+        let switch (xs:'a[]) i j = 
+            let temp = xs.[i]
+            xs.[i] <- xs.[j]
+            xs.[j] <- temp
+            xs
+        let safeLo i = if i >= 0 then i else (len-1)
+        let safeHi i = if i < (len-1) then i else 0
+
         let rec search (xs:Solution) iter =
             if iter > iters
             then xs
             else
                 let i,j = rng.Next(len),rng.Next(len)
-                let xs' = Array.copy xs
-                xs'.[i] <- xs.[j]
-                xs'.[j] <- xs.[i]
-                let improvement = quality xs' > quality xs
+                let before = 
+                    dist xs.[safeLo(i-1)] xs.[i] 
+                    + dist xs.[i] xs.[safeHi(i+1)]
+                    + dist xs.[safeLo(j-1)] xs.[j] 
+                    + dist xs.[j] xs.[safeHi(j+1)]
+                let after = 
+                    dist xs.[safeLo(i-1)] xs.[j] 
+                    + dist xs.[j] xs.[safeHi(i+1)]
+                    + dist xs.[safeLo(j-1)] xs.[i] 
+                    + dist xs.[i] xs.[safeHi(j+1)]
+
+                let improvement = after < before
                 let mistake = rng.NextDouble () < DefaultConfig.ProbaMistake
                 let next = 
                     match (improvement,mistake) with
-                    | true, false -> xs'
+                    | true, false -> switch xs i j
                     | true, true -> xs
                     | false, false -> xs
-                    | false, true -> xs'
+                    | false, true -> switch xs i j
                 search next (iter + 1)
         search xs 0
 
