@@ -4,8 +4,8 @@
     <Instances count="1" />
     <ConfigurationSettings>
       <Setting name="Microsoft.WindowsAzure.Plugins.Diagnostics.ConnectionString" value="UseDevelopmentStorage=true" />
-      <Setting 
-        name="Microsoft.ServiceBus.ConnectionString"               
+      <Setting
+        name="Microsoft.ServiceBus.ConnectionString"
         value="Endpoint=sb://[yourServiceNamespace].servicebus.windows.net/;SharedSecretIssuer=[issuerName];SharedSecretValue=[yourDefaultKey]" />
     </ConfigurationSettings>
   </Role>
@@ -16,6 +16,9 @@
       <Setting
         name="Microsoft.ServiceBus.ConnectionString"
         value="Endpoint=sb://[yourServiceNamespace].servicebus.windows.net/;SharedSecretIssuer=[issuerName];SharedSecretValue=[yourDefaultKey]" />
+      <Setting
+        name="StorageConnectionString"
+        value="DefaultEndpointsProtocol=https;AccountName=myAccount;AccountKey=myKey;" />
     </ConfigurationSettings>
   </Role>
 </ServiceConfiguration>
